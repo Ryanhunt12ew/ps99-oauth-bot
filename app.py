@@ -8,6 +8,8 @@ from flask_dance.consumer import oauth_authorized
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "dev-secret-key-change-me")
+app.config["PS99_CLIENT_ID"] = os.environ.get("PS99_CLIENT_ID")
+app.config["PS99_CLIENT_SECRET"] = os.environ.get("PS99_CLIENT_SECRET")
 
 # OAuth 2.0 Configuration for PS99
 ps99_blueprint = OAuth2ConsumerBlueprint(
@@ -18,9 +20,40 @@ ps99_blueprint = OAuth2ConsumerBlueprint(
     base_url="https://ps99.biggamesapi.io/",
     token_url="https://db.biggames.io/oauth/token",
     authorization_url="https://db.biggames.io/oauth/authorize",
-    redirect_url=os.environ.get("REDIRECT_URI", "https://ps99-oauth-bot-1.onrender.com/callback"),
+    redirect_url="https://ps99-oauth-bot-1.onrender.com/callback",  # Must match registered URI
     storage=MemoryStorage(),
 )
+
+# Override the default callback path to match the registered redirect URI
+@ps99_blueprint.route("/callback", methods=["GET", "POST"])
+def callback():
+    """Handle the OAuth callback at the registered redirect URI."""
+    from flask_dance.consumer import oauth_authorized
+    from flask import request, session, current_app
+    import requests as req
+    
+    # Get the code from the request
+    code = request.args.get("code")
+    if not code:
+        return "Missing code parameter", 400
+    
+    # Exchange code for token
+    token_url = "https://db.biggames.io/oauth/token"
+    data = {
+        "grant_type": "authorization_code",
+        "code": code,
+        "redirect_uri": "https://ps99-oauth-bot-1.onrender.com/callback",
+        "client_id": current_app.config.get("PS99_CLIENT_ID"),
+        "client_secret": current_app.config.get("PS99_CLIENT_SECRET"),
+    }
+    
+    response = req.post(token_url, data=data)
+    if response.status_code == 200:
+        token_data = response.json()
+        session["ps99_oauth_token"] = token_data
+        return "✅ Authorization successful! You can close this window."
+    else:
+        return f"❌ Error: {response.text}", 400
 
 app.register_blueprint(ps99_blueprint, url_prefix="/login")
 
