@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: ps99-oauth-bot
+    runtime: python
+    plan: free
+    autoDeploy: true
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app
+    envVars:
+      - key: SECRET_KEY
+        generateValue: true
+      - key: REDIRECT_URI
+        value: https://your-app.onrender.com/callback
