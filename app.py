@@ -2,76 +2,91 @@ import os
 import json
 import requests
 from flask import Flask, redirect, url_for, session, request, jsonify
-from flask_dance.consumer import OAuth2ConsumerBlueprint
-from flask_dance.consumer.storage import MemoryStorage
-from flask_dance.consumer import oauth_authorized
+from flask import render_template_string
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "dev-secret-key-change-me")
-app.config["PS99_CLIENT_ID"] = os.environ.get("PS99_CLIENT_ID")
-app.config["PS99_CLIENT_SECRET"] = os.environ.get("PS99_CLIENT_SECRET")
 
-# OAuth 2.0 Configuration for PS99
-ps99_blueprint = OAuth2ConsumerBlueprint(
-    "ps99",
-    __name__,
-    client_id=os.environ.get("PS99_CLIENT_ID"),
-    client_secret=os.environ.get("PS99_CLIENT_SECRET"),
-    base_url="https://ps99.biggamesapi.io/",
-    token_url="https://db.biggames.io/oauth/token",
-    authorization_url="https://db.biggames.io/oauth/authorize",
-    redirect_url="https://ps99-oauth-bot-1.onrender.com/callback",  # Must match registered URI
-    storage=MemoryStorage(),
-)
+# OAuth 2.0 Configuration
+CLIENT_ID = os.environ.get("PS99_CLIENT_ID")
+CLIENT_SECRET = os.environ.get("PS99_CLIENT_SECRET")
+REDIRECT_URI = "https://ps99-oauth-bot-1.onrender.com/callback"
 
-# Override the default callback path to match the registered redirect URI
-@ps99_blueprint.route("/callback", methods=["GET", "POST"])
-def callback():
-    """Handle the OAuth callback at the registered redirect URI."""
-    from flask_dance.consumer import oauth_authorized
-    from flask import request, session, current_app
-    import requests as req
+@app.route('/')
+def index():
+    """Home page with link to authorize"""
+    return '''
+    <h1>PS99 Bot OAuth Setup</h1>
+    <p>Click the link below to authorize your bot to access your PS99 data:</p>
+    <a href="/authorize">🔑 Link Your PS99 Account</a>
+    <br><br>
+    <p>After authorizing, your bot will be able to track your purchases!</p>
+    '''
+
+@app.route('/authorize')
+def authorize():
+    """Redirect user to BIG Games OAuth page"""
+    import secrets
+    import hashlib
+    import base64
     
+    # Generate PKCE code verifier and challenge
+    code_verifier = secrets.token_urlsafe(64)
+    code_challenge = base64.urlsafe_b64encode(
+        hashlib.sha256(code_verifier.encode()).digest()
+    ).decode().rstrip('=')
+    
+    # Store verifier in session
+    session['code_verifier'] = code_verifier
+    
+    # Build authorization URL
+    auth_url = (
+        "https://db.biggames.io/oauth/authorize"
+        f"?client_id={CLIENT_ID}"
+        f"&redirect_uri={REDIRECT_URI}"
+        f"&response_type=code"
+        f"&code_challenge={code_challenge}"
+        f"&code_challenge_method=S256"
+    )
+    
+    return redirect(auth_url)
+
+@app.route('/callback')
+def callback():
+    """Handle the OAuth callback"""
     # Get the code from the request
-    code = request.args.get("code")
+    code = request.args.get('code')
+    error = request.args.get('error')
+    
+    if error:
+        return f"❌ Authorization error: {error}", 400
+    
     if not code:
-        return "Missing code parameter", 400
+        return "❌ No authorization code received", 400
     
     # Exchange code for token
     token_url = "https://db.biggames.io/oauth/token"
     data = {
         "grant_type": "authorization_code",
         "code": code,
-        "redirect_uri": "https://ps99-oauth-bot-1.onrender.com/callback",
-        "client_id": current_app.config.get("PS99_CLIENT_ID"),
-        "client_secret": current_app.config.get("PS99_CLIENT_SECRET"),
+        "redirect_uri": REDIRECT_URI,
+        "client_id": CLIENT_ID,
+        "client_secret": CLIENT_SECRET,
+        "code_verifier": session.get('code_verifier', ''),
     }
     
-    response = req.post(token_url, data=data)
+    response = requests.post(token_url, data=data)
+    
     if response.status_code == 200:
         token_data = response.json()
-        session["ps99_oauth_token"] = token_data
-        return "✅ Authorization successful! You can close this window."
+        session['ps99_oauth_token'] = token_data
+        return '''
+        <h1>✅ Authorization Successful!</h1>
+        <p>You can close this window and return to Discord.</p>
+        <p>Your bot can now track your PS99 data.</p>
+        '''
     else:
-        return f"❌ Error: {response.text}", 400
-
-app.register_blueprint(ps99_blueprint, url_prefix="/login")
-
-@app.route('/')
-def index():
-    return '''
-    <h1>PS99 Bot OAuth Setup</h1>
-    <p>Click the link below to authorize your bot to access your PS99 data:</p>
-    <a href="/login/ps99">🔑 Link Your PS99 Account</a>
-    <br><br>
-    <p>After authorizing, your bot will be able to track your purchases!</p>
-    '''
-
-@oauth_authorized.connect
-def logged_in(blueprint, token):
-    """Store the token when user authorizes"""
-    print(f"✅ Token received! {token}")
-    return False
+        return f"❌ Error exchanging code: {response.text}", 400
 
 @app.route('/token')
 def get_token():
@@ -87,7 +102,7 @@ def get_token():
 
 @app.route('/inventory')
 def get_inventory():
-    """Example: Get your inventory using the token"""
+    """Get your inventory using the token"""
     token_data = session.get('ps99_oauth_token')
     if not token_data:
         return jsonify({"error": "Not authenticated"}), 401
