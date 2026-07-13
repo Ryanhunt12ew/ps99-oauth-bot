@@ -16,9 +16,9 @@ ps99_blueprint = OAuth2ConsumerBlueprint(
     client_id=os.environ.get("PS99_CLIENT_ID"),
     client_secret=os.environ.get("PS99_CLIENT_SECRET"),
     base_url="https://ps99.biggamesapi.io/",
-    token_url="https://ps99.biggamesapi.io/v1/oauth/token",
-    authorization_url="https://ps99.biggamesapi.io/v1/oauth/authorize",
-    redirect_url=os.environ.get("REDIRECT_URI", "https://your-app.onrender.com/callback"),
+    token_url="https://db.biggames.io/oauth/token",
+    authorization_url="https://db.biggames.io/oauth/authorize",
+    redirect_url=os.environ.get("REDIRECT_URI", "https://ps99-oauth-bot-1.onrender.com/callback"),
     storage=MemoryStorage(),
 )
 
@@ -38,8 +38,6 @@ def index():
 def logged_in(blueprint, token):
     """Store the token when user authorizes"""
     print(f"✅ Token received! {token}")
-    # In a real app, you'd save this to a database
-    # For now, it's stored in memory
     return False
 
 @app.route('/token')
